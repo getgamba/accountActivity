@@ -1,0 +1,1006 @@
+
+var projectId = '502469322913';
+var token = 'FpXNv7cYLDEDjWczetSPzmjW';
+
+function bigquery(sql) {
+  var request = { query: sql, useLegacySql: false };
+  var results = BigQuery.Jobs.query(request, projectId);
+  var jobId = results.jobReference.jobId;
+
+  while (!results.jobComplete) {
+    Utilities.sleep(500);
+    results = BigQuery.Jobs.getQueryResults(projectId, jobId);
+  }
+
+  var rows = results.rows;
+  while (results.pageToken) {
+    results = BigQuery.Jobs.getQueryResults(projectId, jobId, { pageToken: results.pageToken });
+    rows = rows.concat(results.rows);
+  }
+
+  if (!rows) return undefined;
+  return rows.map(function(row) {
+    return row.f.map(function(col) { return col.v; });
+  });
+}
+
+function diarypost(subject, text, email) {
+  UrlFetchApp.fetch("https://www.getgamba.com/api/v3/webhooks/post_diary/" + token, {
+    method: "post",
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      email: email,
+      subject: subject,
+      content: text,
+      category: 'memo',
+    })
+  });
+}
+
+
+
+//「トライアル中」シートに対するスクリプト//
+function getTrialAccountActivity() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var trialSheet = spreadsheet.getSheetByName('トライアル中')
+  var today = trialSheet.getRange("B1").getValue();
+  var todayString = today.getFullYear() + "-" + ("0" + (today.getMonth() + 1)).slice(-2) + "-" + ("0" + today.getDate()).slice(-2);
+
+  var sql = "SELECT AccountID, CreatedAt, TrialEndAt, ContractedAt, CompanyName, UserName, Telephone, PricePlan, Date, NumOfGroups, "+
+    "NumOfUsersContract, NumOfUsers, Post_Diary, Post_KPI, Post_Note, PostUsers, PostUsers_7Days, Partner, Address, Email, "+
+    "ChatUsers, Duration, Post_30Days, PostUsers_30Days, Post_7Days, PendingBills "+
+    "FROM dwh.status WHERE Date='"+todayString+"' AND PricePlan IS NULL AND AccountID NOT IN (4365, 7277, 14732, 15108) ORDER BY CreatedAt;";
+  var rows = bigquery(sql);
+  var accountIds = rows && rows.map(function(row) { return row[0]; }).join(',') || ''
+  
+  sql = "SELECT AccountID, Possibility, IndustryCategory, NextActionAt, NumOfUsers, Keywords, Employees, UTM, Competitor, Title, CustomerNeeds FROM dwh.accounts WHERE AccountID IN ("+accountIds+");";
+  var rows2 = bigquery(sql);
+
+  for (var i = 0; rows && i < rows.length; ++ i) {
+    var state = '';
+    var category = '';
+    var next_date = '';
+    var estimate_num = '';
+    var search_word = '';
+    var employees = '';
+    var utm = '';
+    for (var j = 0; rows2 && j < rows2.length; ++ j) {
+      if (rows2[j][0] == rows[i][0]) {
+        state = rows2[j][1];
+        category = rows2[j][2];
+        next_date = rows2[j][3];
+        estimate_num = rows2[j][4] && rows2[j][4].replace('to', '〜').replace('over', '>=');
+        search_word = rows2[j][5];
+        employees = rows2[j][6];
+        utm = rows2[j][7];
+        comp = rows2[j][8];
+        title = rows2[j][9];
+        needs = rows2[j][10];
+      }
+    }
+    var range = trialSheet.getRange("A" + (i + 3) + ":X" + (i + 3));
+    range.setValues([[
+      '',  // アカウントID
+      rows[i][4],  // 会社名
+      state, // 確度
+      rows[i][1],  // 登録日
+      rows[i][2],  // トライアル終了日
+      estimate_num, // 利用予定人数
+      employees, // 従業員数
+      next_date, // 次回期日
+      rows[i][5],  // 担当者
+      comp, //競合
+      title, //属性
+      needs, //顧客ニーズ
+      search_word, // ソーシャルなんとか
+      rows[i][19], // メールアドレス
+      rows[i][9],  // グループ数
+      rows[i][11], // ユーザ数
+      rows[i][12], // 投稿数 日報
+      rows[i][13], // 投稿数 KPI
+      rows[i][14], // 投稿数 ノート
+      rows[i][15], // 投稿人数 当日
+      rows[i][16], // 投稿人数 ７日間
+      rows[i][20], // チャット利用人数
+      category, // 産業分類
+      utm, // UTM流入経路
+      
+    ]]);
+    range = trialSheet.getRange("A" + (i + 3));
+    range.setFormula(
+      '=HYPERLINK("https://www.getgamba.com/v3_admin/accounts?account_id='
+      + rows[i][0] + '", ' + rows[i][0] + ')');
+  }
+
+  for (var i = rows && rows.length || 0; i < trialSheet.getMaxRows() - 2; ++ i) {
+    var range = trialSheet.getRange("A" + (i + 3) + ":X" + (i + 3));
+    range.setValues([['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']]);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+//有料契約シートに対するスクリプト
+function getPaidAccountActivity() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var paidSheet = spreadsheet.getSheetByName('有料契約')
+  var today = paidSheet.getRange("B1").getValue();
+  var todayString = today.getFullYear() + "-" + ("0" + (today.getMonth() + 1)).slice(-2) + "-" + ("0" + today.getDate()).slice(-2);
+  
+  var sql = "SELECT AccountID, CreatedAt, TrialEndAt, ContractedAt, CompanyName, UserName, Telephone, PricePlan, Date, NumOfGroups, "+
+    "NumOfUsersContract, NumOfUsers, Post_Diary, Post_KPI, Post_Note, PostUsers, PostUsers_7Days, Partner, Address, Email, "+
+    "ChatUsers, Duration, Post_30Days, PostUsers_30Days, Post_7Days, PendingBills "+
+    "FROM dwh.status WHERE Date='"+todayString+"' AND PricePlan IS NOT NULL ORDER BY CreatedAt;";
+  var rows = bigquery(sql);
+  var accountIds = rows && rows.map(function(row) { return row[0]; }).join(',') || ''
+
+  sql = "SELECT AccountID, IndustryCategory, Employees, ContractReason ,NextActionAt FROM dwh.accounts WHERE AccountID IN ("+accountIds+");";
+  var rows2 = bigquery(sql);
+   
+  for (var i = 0; rows && i < rows.length; ++ i) {
+    var category = '';
+    var num_employee = 0;
+    var contract_reason = '';
+    var next_date ='';
+    for (var j = 0; rows2 && j < rows2.length; ++ j) {
+      if (rows2[j][0] == rows[i][0]) {
+        category = rows2[j][1];
+        num_employee = rows2[j][2];
+        contract_reason = rows2[j][3];
+        next_date = rows2[j][4];
+      }
+    }
+
+    var range = paidSheet.getRange("A" + (i + 3) + ":Z" + (i + 3));
+    range.setValues([[
+      '',  // アカウントID
+      rows[i][4],  // 会社名
+      rows[i][1],  // 登録日
+      rows[i][3],  // 契約日
+      rows[i][5],  // 担当者
+      next_date, //次回期日
+      contract_reason, // 契約理由
+      rows[i][7],  // 契約プラン
+      rows[i][9],  // グループ数
+      rows[i][10], // 購入ユーザ数
+      rows[i][11], // 利用中ユーザ数
+      rows[i][12], // 投稿数 日報
+      rows[i][13], // 投稿数 KPI
+      rows[i][14], // 投稿数 ノート
+      rows[i][15], // 投稿人数 当日
+      rows[i][16], // 投稿人数 ７日間
+      rows[i][16] / rows[i][10], // 投稿率
+      rows[i][20], // チャット利用人数
+      num_employee, // 従業員数
+      num_employee > 0 ? rows[i][10] / num_employee : '-',
+      rows[i][18], // 契約者住所
+      rows[i][19], // メールアドレス
+      rows[i][21], // 契約期間
+      rows[i][6],  // 電話番号
+      rows[i][17], // 代理店情報
+      category, // 産業分類
+    ]]);
+
+    range = paidSheet.getRange("A" + (i + 3));
+    range.setFormula(
+      '=HYPERLINK("https://www.getgamba.com/v3_admin/accounts?account_id='
+      + rows[i][0] + '", ' + rows[i][0] + ')');
+  }
+
+  for (var i = rows && rows.length || 0; i < paidSheet.getMaxRows() - 2; ++ i) {
+    var range = paidSheet.getRange("A" + (i + 3) + ":X" + (i + 3));
+    range.setValues([['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']]);
+  }
+}
+
+function uniq(array) {
+  var uniquedArray = [];
+  for (var i = 0; i < array.length; i ++) {
+    if (uniquedArray.indexOf(array[i]) < 0)
+      uniquedArray.push(array[i]);
+  }
+  return uniquedArray;
+}
+
+function getNextActionList() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName('次回アクション')
+
+  var sql, results1, results2, results3, range;
+
+  sheet.getRange("A3:N" + (sheet.getMaxRows() + 2)).setValue('');
+  // 次回アクションが必要なアカウントのリストを抽出
+  sql = "SELECT AccountID, Employees, Title, URL, Represantative, Acquisition, Keywords, CustomerNeeds, PresentOperation, Competitor, "+
+    "NextActionAt, NextAction, NextActionBy, Possibility, PossibleUsers, LostReason, CompetitorWon, Contact, IndustryCategory, JobCategory, "+
+    "NumOfUsers, UTM FROM dwh.accounts WHERE NextActionAt IS NOT NULL ORDER BY NextActionAt;"
+  var rows1 = bigquery(sql);
+  if (!rows1 || rows1.length == 0)
+    return;
+  
+  var accountIds = rows1 && rows1.map(function(row) { return row[0]; }).join(',') || ''
+  // 次回アクション対象のアカウントの最終statusの日付を取得
+  //sql = "SELECT * FROM " + activityTableId + " WHERE 'AccountID' IN (" + accountIds + ") ORDER BY 'AccountID', '日付' DESC;";
+  sql = "SELECT AccountID, MAX(Date) FROM dwh.status WHERE AccountID IN ("+accountIds+") GROUP BY AccountID;";
+  var rows4 = bigquery(sql);
+  var date_list = uniq(rows4.map(function(row) { return row[1] }))
+
+  // アカウントの諸情報を取得
+  sql = "SELECT AccountID, CompanyName, CreatedAt, TrialEndAt, UserName, Email, Telephone FROM dwh.status WHERE AccountID IN ("+accountIds+") AND Date IN ('"+date_list.join("', '")+"') ORDER BY AccountID, Date DESC;";
+  rows2 = bigquery(sql);
+
+  // アカウントへの最終アクションの情報を取得
+  sql = "SELECT AccountID, STRING(ActionAt) FROM dwh.activities WHERE AccountID IN ("+accountIds+") ORDER BY AccountID, ActionAt;";
+  rows3 = bigquery(sql);
+
+  for (var i = 0; rows1 && i < rows1.length; ++ i) {
+    var record, lastHistory;
+    for (var j = 0; rows1 && j < rows2.length; ++ j) {
+      if (rows2[j][0] == rows1[i][0]) {
+        record = rows2[j];
+        break;
+      }
+    }
+    for (var j = 0; rows3 && j < rows3.length; ++ j) {
+      if (rows3[j][0] == rows1[i][0]) {
+        lastHistory = rows3[j][1].replace(/\+00$/, '');
+        break;
+      }
+    }
+    range = sheet.getRange("A"+(i + 3)+":N"+(i + 3));
+    range.setValues([[
+      rows1[i][10], // 次回期日
+      rows1[i][11], // 次回内容
+      rows1[i][12], // 担当者
+      rows1[i][13], // 受注確度
+      rows1[i][0],  // AccountID
+      record && record[1] || '',  // 会社名
+      record && record[2] || '',  // 登録日
+      record && record[3] || '',  // 終了日
+      record && record[4] || '',  // 担当者
+      record && record[5] || '',  // メールアドレス
+      record && record[6] || '',  // 電話番号
+      rows1[i][3],  // ホームページ
+      rows1[i][1],  // 従業員数
+      lastHistory || '',  // 最終商談日時
+    ]]);
+  }
+}
+
+function onChangeSpreadSheet() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var range = spreadsheet.getActiveCell();
+  var sheetname = sheet.getName();
+  var cellname = range.getA1Notation();
+  
+  if (sheetname.match(/詳細情報/)) {
+    console.log(cellname);
+    if (cellname == "B1")
+      getAccountDetail();
+    else if (cellname.match(/^C(9|11|12|13|14|15|16|17|18|20|21|22|23|24|25|26|27|28)$/))
+      updateAccountDetail();
+  }
+}
+
+function toShowTelNum(str) {
+  var reg = /^(0[789]0|0[1-9])([0-9]+)([0-9]{4,4})$/;
+  var m = str.match(reg);
+  if (m) {
+    return m[1] + "-" + m[2] + "-" + m[3];
+  } else {
+    return str;
+  }
+}
+
+function toSaveTelNum(str) {
+  return str.replace(/-/g, '');
+}
+
+function getAccountDetail() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("B1").getValue() + 0;
+  
+  var sql, results, range, text, data;
+  
+  // アクティビティテーブル読み込み
+  sql = "SELECT CompanyName, CreatedAt, ContractedAt, UserName, Address, Telephone, Partner, PricePlan, Email, NumOfUsers, "+
+    "Duration, PendingBills, Date, TrialEndAt FROM dwh.status "+
+    "WHERE AccountID="+accountId+" ORDER BY Date DESC LIMIT 1;";
+  var rows = bigquery(sql);
+  
+  if (!rows || rows.length == 0) {
+    sheet.getRange("C2:C8").setValue('');
+    sheet.getRange("F4:F7").setValue('');
+    sheet.getRange("H2:H8").setValue('');
+    sheet.getRange("C9").setValue('');
+    sheet.getRange("C11:C26").setValue('');
+    sheet.getRange("E9").setValue('');
+    return
+  }
+  
+  range = sheet.getRange("C2:C8");
+  range.setValues([
+    [rows[0][0]], // 会社名
+    [rows[0][1]], // 登録日
+    [rows[0][2]], // 契約日
+    [rows[0][3]], // 担当者
+    [rows[0][4]], // 住所
+    [toShowTelNum(rows[0][5])], // 電話番号
+    [rows[0][6]], // 代理店
+  ]);
+  range = sheet.getRange("F4:F7");
+  range.setValues([
+    [rows[0][7]], // 契約プラン
+    [rows[0][8]], // メールアドレス
+    [rows[0][9]], // ユーザ数
+    [rows[0][11]], // 未入金請求数
+  ]);
+  range = sheet.getRange("H3:H4");
+  range.setValues([
+    [rows[0][13]],// トライアル終了日
+    [rows[0][10]] // 契約期間
+  ]);
+
+  // 解約アカウント読み込み
+  sql = "SELECT CanceledAt, Reason, Description FROM dwh.cancels WHERE AccountID="+accountId+" LIMIT 1;";
+  rows = bigquery(sql);
+  if (rows) {
+    sheet.getRange("H2").setValue(rows[0][0]); // H2: 解約日
+    range = sheet.getRange("C29:C30");
+    range.setValues([
+      [rows[0][1]], // C29: 解約理由
+      [rows[0][2]], // C30: 解約時のご意見
+    ]);
+  } else {
+    sheet.getRange("H2").setValue('');
+    range = sheet.getRange("C29:C30");
+    range.setValues([[''], ['']]);
+  }
+
+  // マスターテーブル読み込み
+  sql = "SELECT AccountID, Employees, Title, URL, Represantative, Acquisition, Keywords, CustomerNeeds, PresentOperation, Competitor, "+
+    "NextActionAt, NextAction, NextActionBy, Possibility, PossibleUsers, LostReason, CompetitorWon, Contact, IndustryCategory, JobCategory, "+
+    "NumOfUsers, UTM, ContractReason FROM dwh.accounts WHERE AccountID="+accountId+";";
+  rows = bigquery(sql);
+
+  if (rows && rows.length > 0) {
+    sheet.getRange("C9").setValue(isNaN(rows[0][1]) ? '' : (rows[0][1] < 1 ? '不明' : rows[0][1])); // 従業員数
+    range = sheet.getRange("C11:C28");
+    range.setValues([
+      [rows[0][18]],// C11: 産業分類
+      [rows[0][2]], // C12: 登録者属性
+      [rows[0][3]], // C13: ホームページ
+      [rows[0][4]], // C14: 代表者名
+      [rows[0][17]],// C15: 連絡先情報
+      [rows[0][6]], // C16: 検索キーワード ⇒ソーシャルスタイル
+      [rows[0][8]], // C17: 現状の日報運用
+      [rows[0][7]], // C18: お客様ニーズ
+      [rows[0][9]], // C19: 比較検討対象
+      [''], // C20 ブランク
+      [rows[0][10]], // C21: 次回期日
+      [rows[0][11]], // C22: 次回内容
+      [rows[0][12]], // C23: 担当者
+      [rows[0][13]], // C24: 受注確度
+      [isNaN(rows[0][14]) ? '' : rows[0][14]], // C25: 契約ユーザ数見込み
+      [rows[0][22]], // C26: 受注理由
+      [rows[0][15]], // C27: 失注理由
+      [rows[0][16]], // C28: 他社採用サービス
+    ]);
+    sheet.getRange("F8").setValue((rows[0][20] || '').replace(/to/, '〜')); // 利用予定人数
+    sheet.getRange("H8").setValue(rows[0][21]); // UTM情報
+  } else {
+    sheet.getRange("C9").setValue('');
+    sheet.getRange("C11:C28").setValue('');
+    sheet.getRange("C19").setValue(cancelDate);
+    sheet.getRange("F8").setValue('');
+    sheet.getRange("H8").setValue('');
+  }
+
+  // 商談履歴読み込み
+  sql = "SELECT AccountID, CompanyName, STRING(ActionAt), Detail, ActionBy, ActionType FROM dwh.activities WHERE AccountID="+accountId+" ORDER BY ActionAt DESC;";
+  rows = bigquery(sql);
+  text = "";
+  for (var i = 0; rows && i < rows.length; i ++) {
+    text += rows[i][2].replace(/\+00$/, '') + " " + rows[i][4] + " " + (rows[i][5] ? rows[i][5] : "") + "\n" + rows[i][3] + "\n\n";
+  }
+  sheet.getRange("E9").setValue(text);
+    
+
+ 
+  // 推移読み込み
+  sql = "SELECT Date, NumOfGroups, NumOfUsers, Post_Diary, Post_KPI, Post_Note, PostUsers, ChatUsers FROM dwh.status WHERE AccountID="+accountId+" ORDER BY Date DESC LIMIT 365;";
+  rows = bigquery(sql);
+  range = sheet.getRange("A35:I500");
+  data = [];
+  for (var i = 0; i < 466; i ++) {
+    if (rows && i < rows.length)
+      data.push([
+        rows[i][0], // 日付
+        rows[i][1], // グループ数
+        rows[i][2], // ユーザ数
+        '',
+        rows[i][3], // 投稿数　日報
+        rows[i][4], // KPI
+        rows[i][5], // ノート
+        rows[i][6], // 投稿人数
+        rows[i][7], // チャット人数
+      ]);
+    else
+      data.push(['', '', '', '', '', '', '', '', '']);
+  }
+  range.setValues(data);
+  range = sheet.getRange("D35:D500");
+  range.setFormula('=INDIRECT("RC[-1]", FALSE)-INDIRECT("R[1]C[-1]", FALSE)');
+  // メルマガ開封状況を読み込み
+  sql = "SELECT name, template, status FROM dwh.mailmag_status WHERE account_id="+accountId;
+  rows = bigquery(sql);
+  range = sheet.getRange("M33:N39");
+  data = [['', ''], ['', ''], ['', ''], ['', ''], ['', ''], ['', ''], ['', '']];
+  for (var i = 0; rows && i < rows.length; i ++) {
+    var match = rows[i][1].match(/trial-notification-([1-7])$/);
+    if (match) {
+      data[parseInt(match[1]) - 1][rows[i][2] == 'click' ? 1 : 0] = "YES";
+    }
+  }
+  range.setValues(data);
+}
+
+function updateAccountDetail() {
+  console.log('update detail');
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("B1").getValue() + 0;
+  var sql, results, range;
+  var data = {};
+
+  range = sheet.getRange("C9:C28").getValues();
+  data['AccountID'] = accountId;
+  data['Employees'] = parseInt(range[0][0]) || 0; // C9: 従業員数
+  data['IndustryCategory'] = "'"+range[2][0]+"'"; // C11: 産業分類
+  data['Title']  = "'"+range[3][0]+"'";  // C12: 登録者属性
+  data['URL']    = "'"+range[4][0]+"'";  // C13: ホームページ
+  data['Represantative'] = "'"+range[5][0]+"'";  // C14: 代表者
+  data['Contact']        = "'"+range[6][0]+"'";  // C15: 連絡先情報
+  data['Keywords']       = "'"+range[7][0]+"'";  // C16: ソーシャルスタイル
+  data['PresentOperation'] = "'"+range[8][0]+"'";  // C17: 現状の日報運用
+  data['CustomerNeeds'] = "'"+range[9][0]+"'";  // C18: 現状の課題
+  data['Competitor']    = "'"+range[10][0]+"'"; // C19: 比較検討サービス
+
+  data['NextActionAt']  = range[12][0] ? "'"+Utilities.formatDate(range[12][0], "JST", "yyyy-MM-dd") + "'" : "NULL";
+  data['NextAction']    = "'"+range[13][0]+"'"; // C22: 次回内容
+  data['NextActionBy']  = "'"+range[14][0]+"'"; // C23: 担当者
+  data['Possibility']   = "'"+range[15][0]+"'"; // C24: 受注確度
+  data['PossibleUsers'] = range[16][0] || 0;    // C25: 契約ユーザ数見込み
+  data['ContractReason']= "'"+range[17][0]+"'"; // C26: 契約理由
+  data['LostReason']    = "'"+range[18][0]+"'"; // C27: 失注理由
+  data['CompetitorWon'] = "'"+range[19][0]+"'"; // C28: 他社採用サービス
+
+  sql = "SELECT AccountID FROM dwh.accounts WHERE AccountID="+accountId+";";
+  if (bigquery(sql)) {
+    var keyvalues = Object.keys(data).map(function(key) {
+      return key + "=" + data[key]
+    }).join(', ');
+    sql = "UPDATE dwh.accounts SET "+keyvalues+" WHERE AccountID="+accountId+";";
+    bigquery(sql);
+  } else {
+    sql = "INSERT dwh.accounts ("+ Object.keys(data).join(', ') + ") VALUES (" +
+      Object.keys(data).map(function(key){ return data[key]; }).join(', ')+ ");";
+    bigquery(sql);
+  }
+}
+
+function addHistory() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("B1").getValue() + 0;
+  var company = sheet.getRange("C2").getValue();
+  var sql, results, range;
+  var data = {};
+
+  // 商談履歴書き込み
+  range = sheet.getRange("E26:H27").getValues();
+  data['AccountID'] = accountId;
+  data['CompanyName'] = "'"+company.replace(/'/g, "")+"'";
+  data['ActionAt'] = "'"+Utilities.formatDate(new Date(), "JST", "yyyy-MM-dd HH:mm:ss")+"'";
+  data['ActionBy'] = "'"+range[0][1]+"'";
+  data['ActionType'] = "'"+range[0][0]+"'";
+  data['Detail'] = "'"+range[1][0].replace(/\n/g, '\\n').replace(/\r/g, "").replace(/'/g, "")+"'";
+  data['ActionTo'] ="'"+range[0][2]+ "'" ;
+  data['ActionResult'] = "'"+range[0][3]+ "'";
+
+  if (data['Detail'] == "''") return;
+  
+  
+  sql = "INSERT dwh.activities ("+ Object.keys(data).join(', ') + ") VALUES (" +
+    Object.keys(data).map(function(key){ return data[key]; }).join(', ') + ");";
+  console.log(Object.keys(data).map(function(key){ return data[key]; }).join(','));
+  bigquery(sql);
+
+  // 商談履歴読み込み
+  sql = "SELECT AccountID, CompanyName, STRING(ActionAt), Detail, ActionBy, ActionType FROM dwh.activities WHERE AccountID="+accountId+" ORDER BY ActionAt DESC;";
+  rows = bigquery(sql);
+  text = "";
+  for (var i = 0; rows && i < rows.length; i ++) {
+    text += rows[i][2].replace(/\+00$/, '') + " " + rows[i][4] + " " + (rows[i][5] ? rows[i][5] : "") + "\n" + rows[i][3] + "\n\n";
+  }
+  sheet.getRange("E9").setValue(text);
+  sheet.getRange("E27").setValue('');
+
+  var email
+  var staff_sheet = spreadsheet.getSheetByName('担当者マスター');
+  var staff = staff_sheet.getRange("A2:B100").getValues();
+  for (i = 0; i < staff.length; i ++) {
+    if (staff[i][0] == range[0][1]) {
+      email = staff[i][1];
+      break;
+    }
+  }
+  diarypost(accountId + ". " + company, range[1][0], email);
+}
+
+
+
+
+//アクティビティ推移を365日分取得する//
+function getAccountDetail365() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("B1").getValue() + 0;
+  
+  var sql, results, range, text, data;
+  
+  // アクティビティテーブル読み込み
+  sql = "SELECT CompanyName, CreatedAt, ContractedAt, UserName, Address, Telephone, Partner, PricePlan, Email, NumOfUsers, "+
+    "Duration, PendingBills, Date, TrialEndAt FROM dwh.status "+
+    "WHERE AccountID="+accountId+" ORDER BY Date DESC LIMIT 1;";
+  var rows = bigquery(sql);
+  
+  if (!rows || rows.length == 0) {
+    sheet.getRange("C2:C8").setValue('');
+    sheet.getRange("F4:F7").setValue('');
+    sheet.getRange("H2:H8").setValue('');
+    sheet.getRange("C9").setValue('');
+    sheet.getRange("C11:C26").setValue('');
+    sheet.getRange("E9").setValue('');
+    return
+  }
+  
+  range = sheet.getRange("C2:C8");
+  range.setValues([
+    [rows[0][0]], // 会社名
+    [rows[0][1]], // 登録日
+    [rows[0][2]], // 契約日
+    [rows[0][3]], // 担当者
+    [rows[0][4]], // 住所
+    [toShowTelNum(rows[0][5])], // 電話番号
+    [rows[0][6]], // 代理店
+  ]);
+  range = sheet.getRange("F4:F7");
+  range.setValues([
+    [rows[0][7]], // 契約プラン
+    [rows[0][8]], // メールアドレス
+    [rows[0][9]], // ユーザ数
+    [rows[0][11]], // 未入金請求数
+  ]);
+  range = sheet.getRange("H3:H4");
+  range.setValues([
+    [rows[0][13]],// トライアル終了日
+    [rows[0][10]] // 契約期間
+  ]);
+
+  // 解約アカウント読み込み
+  sql = "SELECT CanceledAt, Reason, Description FROM dwh.cancels WHERE AccountID="+accountId+" LIMIT 1;";
+  rows = bigquery(sql);
+  if (rows) {
+    sheet.getRange("H2").setValue(rows[0][0]); // H2: 解約日
+    range = sheet.getRange("C29:C30");
+    range.setValues([
+      [rows[0][1]], // C29: 解約理由
+      [rows[0][2]], // C30: 解約時のご意見
+    ]);
+  } else {
+    sheet.getRange("H2").setValue('');
+    range = sheet.getRange("C29:C30");
+    range.setValues([[''], ['']]);
+  }
+
+  // マスターテーブル読み込み
+  sql = "SELECT AccountID, Employees, Title, URL, Represantative, Acquisition, Keywords, CustomerNeeds, PresentOperation, Competitor, "+
+    "NextActionAt, NextAction, NextActionBy, Possibility, PossibleUsers, LostReason, CompetitorWon, Contact, IndustryCategory, JobCategory, "+
+    "NumOfUsers, UTM, ContractReason FROM dwh.accounts WHERE AccountID="+accountId+";";
+  rows = bigquery(sql);
+
+  if (rows && rows.length > 0) {
+    sheet.getRange("C9").setValue(isNaN(rows[0][1]) ? '' : (rows[0][1] < 1 ? '不明' : rows[0][1])); // 従業員数
+    range = sheet.getRange("C11:C28");
+    range.setValues([
+      [rows[0][18]],// C11: 産業分類
+      [rows[0][2]], // C12: 登録者属性
+      [rows[0][3]], // C13: ホームページ
+      [rows[0][4]], // C14: 代表者名
+      [rows[0][17]],// C15: 連絡先情報
+      [rows[0][6]], // C16: 検索キーワード ⇒ソーシャルスタイル
+      [rows[0][8]], // C17: 現状の日報運用
+      [rows[0][7]], // C18: お客様ニーズ
+      [rows[0][9]], // C19: 比較検討対象
+      [''], // C20 ブランク
+      [rows[0][10]], // C21: 次回期日
+      [rows[0][11]], // C22: 次回内容
+      [rows[0][12]], // C23: 担当者
+      [rows[0][13]], // C24: 受注確度
+      [isNaN(rows[0][14]) ? '' : rows[0][14]], // C25: 契約ユーザ数見込み
+      [rows[0][22]], // C26: 受注理由
+      [rows[0][15]], // C27: 失注理由
+      [rows[0][16]], // C28: 他社採用サービス
+    ]);
+    sheet.getRange("F8").setValue((rows[0][20] || '').replace(/to/, '〜')); // 利用予定人数
+    sheet.getRange("H8").setValue(rows[0][21]); // UTM情報
+  } else {
+    sheet.getRange("C9").setValue('');
+    sheet.getRange("C11:C28").setValue('');
+    sheet.getRange("C19").setValue(cancelDate);
+    sheet.getRange("F8").setValue('');
+    sheet.getRange("H8").setValue('');
+  }
+
+  // 商談履歴読み込み
+  sql = "SELECT AccountID, CompanyName, STRING(ActionAt), Detail, ActionBy, ActionType FROM dwh.activities WHERE AccountID="+accountId+" ORDER BY ActionAt DESC;";
+  rows = bigquery(sql);
+  text = "";
+  for (var i = 0; rows && i < rows.length; i ++) {
+    text += rows[i][2].replace(/\+00$/, '') + " " + rows[i][4] + " " + (rows[i][5] ? rows[i][5] : "") + "\n" + rows[i][3] + "\n\n";
+  }
+  sheet.getRange("E9").setValue(text);
+    
+  // 推移読み込み
+  sql = "SELECT Date, NumOfGroups, NumOfUsers, Post_Diary, Post_KPI, Post_Note, PostUsers, ChatUsers FROM dwh.status WHERE AccountID="+accountId+" ORDER BY Date DESC LIMIT 365;";
+  rows = bigquery(sql);
+  range = sheet.getRange("A35:I500");
+  data = [];
+  for (var i = 0; i < 466; i ++) {
+    if (rows && i < rows.length)
+      data.push([
+        rows[i][0], // 日付
+        rows[i][1], // グループ数
+        rows[i][2], // ユーザ数
+        '',
+        rows[i][3], // 投稿数　日報
+        rows[i][4], // KPI
+        rows[i][5], // ノート
+        rows[i][6], // 投稿人数
+        rows[i][7], // チャット人数
+      ]);
+    else
+      data.push(['', '', '', '', '', '', '', '', '']);
+  }
+  range.setValues(data);
+  range = sheet.getRange("D35:D500");
+  range.setFormula('=INDIRECT("RC[-1]", FALSE)-INDIRECT("R[1]C[-1]", FALSE)');
+}
+
+
+
+//B列に入力したアカウント番号を一括して呼び出せるようにする。（１個め）//
+function getAccountDetailmore1() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("B1").getValue() + 0;
+  
+  var sql, results, range, text, data;
+  
+  // アクティビティテーブル読み込み
+  sql = "SELECT CompanyName, CreatedAt, ContractedAt, UserName, Address, Telephone, Partner, PricePlan, Email, NumOfUsers, "+
+    "Duration, PendingBills, Date, TrialEndAt FROM dwh.status "+
+    "WHERE AccountID="+accountId+" ORDER BY Date DESC LIMIT 1;";
+  var rows = bigquery(sql);
+  
+  if (!rows || rows.length == 0) {
+    sheet.getRange("C2:C8").setValue('');
+    sheet.getRange("F4:F7").setValue('');
+    sheet.getRange("H2:H8").setValue('');
+    sheet.getRange("C9").setValue('');
+    sheet.getRange("C11:C26").setValue('');
+    sheet.getRange("E9").setValue('');
+    return
+  }
+  
+  range = sheet.getRange("C2:C8");
+  range.setValues([
+    [rows[0][0]], // 会社名
+    [rows[0][1]], // 登録日
+    [rows[0][2]], // 契約日
+    [rows[0][3]], // 担当者
+    [rows[0][4]], // 住所
+    [toShowTelNum(rows[0][5])], // 電話番号
+    [rows[0][6]], // 代理店
+  ]);
+  range = sheet.getRange("F4:F7");
+  range.setValues([
+    [rows[0][7]], // 契約プラン
+    [rows[0][8]], // メールアドレス
+    [rows[0][9]], // ユーザ数
+    [rows[0][11]], // 未入金請求数
+  ]);
+  range = sheet.getRange("H3:H4");
+  range.setValues([
+    [rows[0][13]],// トライアル終了日
+    [rows[0][10]] // 契約期間
+  ]);
+
+  // 解約アカウント読み込み
+  sql = "SELECT CanceledAt, Reason, Description FROM dwh.cancels WHERE AccountID="+accountId+" LIMIT 1;";
+  rows = bigquery(sql);
+  if (rows) {
+    sheet.getRange("H2").setValue(rows[0][0]); // H2: 解約日
+    range = sheet.getRange("C29:C30");
+    range.setValues([
+      [rows[0][1]], // C29: 解約理由
+      [rows[0][2]], // C30: 解約時のご意見
+    ]);
+  } else {
+    sheet.getRange("H2").setValue('');
+    range = sheet.getRange("C29:C30");
+    range.setValues([[''], ['']]);
+  }
+
+  // マスターテーブル読み込み
+  sql = "SELECT AccountID, Employees, Title, URL, Represantative, Acquisition, Keywords, CustomerNeeds, PresentOperation, Competitor, "+
+    "NextActionAt, NextAction, NextActionBy, Possibility, PossibleUsers, LostReason, CompetitorWon, Contact, IndustryCategory, JobCategory, "+
+    "NumOfUsers, UTM, ContractReason FROM dwh.accounts WHERE AccountID="+accountId+";";
+  rows = bigquery(sql);
+
+  if (rows && rows.length > 0) {
+    sheet.getRange("C9").setValue(isNaN(rows[0][1]) ? '' : (rows[0][1] < 1 ? '不明' : rows[0][1])); // 従業員数
+    range = sheet.getRange("C11:C28");
+    range.setValues([
+      [rows[0][18]],// C11: 産業分類
+      [rows[0][2]], // C12: 登録者属性
+      [rows[0][3]], // C13: ホームページ
+      [rows[0][4]], // C14: 代表者名
+      [rows[0][17]],// C15: 連絡先情報
+      [rows[0][6]], // C16: 検索キーワード ⇒ソーシャルスタイル
+      [rows[0][8]], // C17: 現状の日報運用
+      [rows[0][7]], // C18: お客様ニーズ
+      [rows[0][9]], // C19: 比較検討対象
+      [''], // C20 ブランク
+      [rows[0][10]], // C21: 次回期日
+      [rows[0][11]], // C22: 次回内容
+      [rows[0][12]], // C23: 担当者
+      [rows[0][13]], // C24: 受注確度
+      [isNaN(rows[0][14]) ? '' : rows[0][14]], // C25: 契約ユーザ数見込み
+      [rows[0][22]], // C26: 受注理由
+      [rows[0][15]], // C27: 失注理由
+      [rows[0][16]], // C28: 他社採用サービス
+    ]);
+    sheet.getRange("F8").setValue((rows[0][20] || '').replace(/to/, '〜')); // 利用予定人数
+    sheet.getRange("H8").setValue(rows[0][21]); // UTM情報
+  } else {
+    sheet.getRange("C9").setValue('');
+    sheet.getRange("C11:C28").setValue('');
+    sheet.getRange("C19").setValue(cancelDate);
+    sheet.getRange("F8").setValue('');
+    sheet.getRange("H8").setValue('');
+  }
+
+  // 商談履歴読み込み
+  sql = "SELECT AccountID, CompanyName, STRING(ActionAt), Detail, ActionBy, ActionType FROM dwh.activities WHERE AccountID="+accountId+" ORDER BY ActionAt DESC;";
+  rows = bigquery(sql);
+  text = "";
+  for (var i = 0; rows && i < rows.length; i ++) {
+    text += rows[i][2].replace(/\+00$/, '') + " " + rows[i][4] + " " + (rows[i][5] ? rows[i][5] : "") + "\n" + rows[i][3] + "\n\n";
+  }
+  sheet.getRange("E9").setValue(text);
+    
+  // 推移読み込み
+  sql = "SELECT Date, NumOfGroups, NumOfUsers, Post_Diary, Post_KPI, Post_Note, PostUsers, ChatUsers FROM dwh.status WHERE AccountID="+accountId+" ORDER BY Date DESC LIMIT 365;";
+  rows = bigquery(sql);
+  range = sheet.getRange("A35:I500");
+  data = [];
+  for (var i = 0; i < 466; i ++) {
+    if (rows && i < rows.length)
+      data.push([
+        rows[i][0], // 日付
+        rows[i][1], // グループ数
+        rows[i][2], // ユーザ数
+        '',
+        rows[i][3], // 投稿数　日報
+        rows[i][4], // KPI
+        rows[i][5], // ノート
+        rows[i][6], // 投稿人数
+        rows[i][7], // チャット人数
+      ]);
+    else
+      data.push(['', '', '', '', '', '', '', '', '']);
+  }
+  range.setValues(data);
+  range = sheet.getRange("D35:D500");
+  range.setFormula('=INDIRECT("RC[-1]", FALSE)-INDIRECT("R[1]C[-1]", FALSE)');
+}
+
+
+function getAccountDetail1(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L2").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+  
+function getAccountDetail2(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L3").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+  
+function getAccountDetail3(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L4").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+  
+
+function getAccountDetail4(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L5").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+  
+
+function getAccountDetail5(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L6").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+
+function getAccountDetail6(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L7").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+
+function getAccountDetail7(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L8").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+
+function getAccountDetail8(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L9").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+
+function getAccountDetail9(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var accountId = sheet.getRange("L10").getValue() + 0;
+  
+  sheet.getRange("B1").setValue(accountId);
+  getAccountDetail()
+}
+
+
+//定型文の内容を詳細情報シートに貼り付けるスクリプト（１個目）
+function readFixedMail1(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var fixedMailSheet = spreadsheet.getSheetByName("定型文メール内容");
+  var mailSubject = fixedMailSheet.getRange("B2").getValue()
+  var fixedMailTitle = fixedMailSheet.getRange("B1").getValue()
+  var mail
+
+  
+  var mailMessage = fixedMailSheet.getRange("B3:B30").getValues();
+  sheet.getRange("N43").setValue(fixedMailTitle); //定型文タイトルを読み込み
+  sheet.getRange("N44").setValue(mailSubject); //件名を読み込み
+  sheet.getRange("L53:L80").setValues(mailMessage); //メール文面を読み込み
+}
+
+//定型文の内容を詳細情報シートに貼り付けるスクリプト（2個目）
+function readFixedMail2(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var fixedMailSheet = spreadsheet.getSheetByName("定型文メール内容");
+  var mailSubject = fixedMailSheet.getRange("C2").getValue()
+  var fixedMailTitle = fixedMailSheet.getRange("C1").getValue()
+  var mail
+
+  
+  var mailMessage = fixedMailSheet.getRange("C3:C30").getValues();
+  sheet.getRange("N43").setValue(fixedMailTitle); //定型文タイトルを読み込み
+  sheet.getRange("N44").setValue(mailSubject); //件名を読み込み
+  sheet.getRange("L53:L80").setValues(mailMessage); //メール文面を読み込み
+}
+
+//定型文の内容を詳細情報シートに貼り付けるスクリプト（3個目）
+function readFixedMail3(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var fixedMailSheet = spreadsheet.getSheetByName("定型文メール内容");
+  var mailSubject = fixedMailSheet.getRange("D2").getValue()
+  var fixedMailTitle = fixedMailSheet.getRange("D1").getValue()
+  var mail
+
+  
+  var mailMessage = fixedMailSheet.getRange("D3:D30").getValues();
+  sheet.getRange("N43").setValue(fixedMailTitle); //定型文タイトルを読み込み
+  sheet.getRange("N44").setValue(mailSubject); //件名を読み込み
+  sheet.getRange("L53:L80").setValues(mailMessage); //メール文面を読み込み
+}
+
+//定型文の内容を詳細情報シートに貼り付けるスクリプト（4個目）
+function readFixedMail4(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var fixedMailSheet = spreadsheet.getSheetByName("定型文メール内容");
+  var mailSubject = fixedMailSheet.getRange("E2").getValue()
+  var fixedMailTitle = fixedMailSheet.getRange("E1").getValue()
+  var mailMessage = fixedMailSheet.getRange("E3:E30").getValues();
+  
+  sheet.getRange("N43").setValue(fixedMailTitle); //定型文タイトルを読み込み
+  sheet.getRange("N44").setValue(mailSubject); //件名を読み込み
+  sheet.getRange("L53:L80").setValues(mailMessage); //メール文面を読み込み
+}
+
+
+
+
+//詳細情報に貼り付けられた内容を取り込み、メールで送るスクリプト（１個目）
+function sendFixedMail１(){
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getActiveSheet();
+  var fixedMailSheet = spreadsheet.getSheetByName('定型文メール内容');
+  var htmlBody1 = sheet.getRange('L46:L80').getValues().join('');
+  var subject = sheet.getRange('N44').getValue()
+  var to = sheet.getRange('N45').getValue() //実装時に宛先をこれに切り替える！
+  var sentLog = sheet.getRange('N43').getValue() //送った定型文のタイトル
+  
+
+  MailApp.sendEmail({
+        //to: "onoyoshi1234@gmail.com", これはテスト用の宛先
+    to: to,
+    subject: subject,
+    htmlBody: htmlBody1,
+    from: "customers@getgamba.com",
+    cc: "customers@getgamba.com",
+    name: "gamba!カスタマーサポート"
+   });
+
+ 
+  sheet.getRange('E27').setValue(`定型文「${sentLog}」送付`)
+ 　addHistory()
+ 
+}
